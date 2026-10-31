@@ -170,8 +170,15 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/state":
             # Polled by tablets every second; they report what they are playing via ?playing=
             if self.query("tablet"):
-                tablets[self.client_address[0]] = {"seen": now_ms(), "playing": self.query("playing"),
-                                                   "name": self.query("tablet")}
+                ip = self.client_address[0]
+                t = {"seen": now_ms(), "playing": self.query("playing"), "name": self.query("tablet"),
+                     "loc": tablets.get(ip, {}).get("loc")}  # keep the last known location
+                try:
+                    t["loc"] = {"lat": float(self.query("lat")), "lng": float(self.query("lng")),
+                                "acc": int(self.query("acc") or 0) or None, "fix": int(self.query("fix") or 0) or None}
+                except ValueError:
+                    pass  # no fix in this poll
+                tablets[ip] = t
             body = {"ride": get_ride(), "videos": video_list(), "tablets": tablets}
             self.reply(json.dumps(body).encode(), "application/json")
         elif path.startswith("/videos/"):

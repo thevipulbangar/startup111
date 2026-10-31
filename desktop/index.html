@@ -138,6 +138,18 @@ function renderDevices() {
   }
 }
 
+// "📍 18.520430, 73.856743 ±12 m · 1 min ago · Open map"
+function locationLine(loc) {
+  const d = el("div", "muted");
+  if (!loc) return d.append("📍 Location not available yet (allow location on the tablet, turn on GPS)"), d;
+  const ll = loc.lat.toFixed(6) + ", " + loc.lng.toFixed(6);
+  const a = el("a", "", "Open map");
+  a.href = "https://www.google.com/maps?q=" + loc.lat + "," + loc.lng;
+  a.target = "_blank"; a.rel = "noopener";
+  d.append("📍 " + ll + (loc.acc ? " ±" + loc.acc + " m" : "") + (loc.fix ? " · " + ago(loc.fix) : "") + " · ", a);
+  return d;
+}
+
 function renderState(s) {
   const on = s.ride.active;
   $("rideState").textContent = on ? "🟢 Ride in progress — ads playing" : "⚪ No ride — ads stopped";
@@ -174,6 +186,7 @@ function renderState(s) {
     c.append(el("div", "bold", (online ? "🟢 " : "🔴 ") + "📺 " + t.name),
              el("div", "muted", "IP " + ip + " · " + (online ? "online" : "offline, last seen " + ago(t.seen))),
              el("div", "muted", t.playing ? "▶ Playing " + t.playing : "Idle"));
+    c.append(locationLine(t.loc));
     tb.append(c);
   }
 }

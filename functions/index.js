@@ -80,10 +80,17 @@ exports.api = onRequest({ region: "asia-south1", maxInstances: 10 }, async (req,
     const id = str(req.query.id || req.query.tablet, 64).replace(/[^\w.-]/g, "_");
     if (id) {
       const playing = str(req.query.playing, 200);
+      const lat = Number(req.query.lat), lng = Number(req.query.lng);
+      const loc = Number.isFinite(lat) && Number.isFinite(lng) && req.query.lat
+        ? { lat, lng, acc: Number(req.query.acc) || null, fix: Number(req.query.fix) || null } : null;
       const prev = lastBeat.get(id);
-      if (!prev || prev.playing !== playing || Date.now() - prev.at > 30000) {
-        lastBeat.set(id, { playing, at: Date.now() });
-        await db.doc(`tablets/${id}`).set({ name: str(req.query.tablet, 80), ip, playing, seen: Date.now() });
+      // ~0.0002° is about 20 m: write when the cab has moved, not on every GPS jitter.
+      const moved = loc && (!prev?.loc || Math.abs(loc.lat - prev.loc.lat) + Math.abs(loc.lng - prev.loc.lng) > 0.0002);
+      if (!prev || prev.playing !== playing || moved || Date.now() - prev.at > 30000) {
+        lastBeat.set(id, { playing, loc: loc || prev?.loc, at: Date.now() });
+        const t = { name: str(req.query.tablet, 80), ip, playing, seen: Date.now() };
+        if (loc) t.loc = loc;
+        await db.doc(`tablets/${id}`).set(t, { merge: true }); // merge keeps the last known location
       }
     }
     return res.json(await stateBody());

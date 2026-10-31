@@ -2,7 +2,12 @@ package com.cabscreen;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.Manifest;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -62,6 +67,16 @@ public class PlayerActivity extends Activity {
     private volatile String current = "";                      // name playing now, "" when stopped
     private int index;
 
+    // Latest GPS/network fix, sent to the server with every poll so the website can show where the cab is.
+    private volatile Location fix;
+    // Anonymous class, not a lambda: on Android 10 and older these methods have no default body.
+    private final LocationListener onFix = new LocationListener() {
+        @Override public void onLocationChanged(Location l) { if (better(l, fix)) fix = l; }
+        @Override public void onStatusChanged(String p, int s, Bundle e) { }
+        @Override public void onProviderEnabled(String p) { }
+        @Override public void onProviderDisabled(String p) { }
+    };
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -85,6 +100,38 @@ public class PlayerActivity extends Activity {
         video.setOnErrorListener((mp, what, extra) -> { next(); return true; }); // bad file: skip it
         root.setOnLongClickListener(v -> { askServer(); return true; });
         video.setOnLongClickListener(v -> { askServer(); return true; });
+
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION}, 1);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        startLocation();
+    }
+
+    private void startLocation() {
+        LocationManager lm = (LocationManager) getSystemService(LOCATION_SERVICE);
+        try {
+            lm.removeUpdates(onFix);
+            for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                if (!lm.isProviderEnabled(p)) continue;
+                onFix.onLocationChanged(lm.getLastKnownLocation(p)); // ignored if null
+                lm.requestLocationUpdates(p, 5000, 0, onFix, Looper.getMainLooper());
+            }
+        } catch (SecurityException | IllegalArgumentException ignored) { } // no permission yet / no such provider
+    }
+
+    /** Prefer a newer fix; within 30s of each other, prefer the more accurate one. */
+    static boolean better(Location n, Location old) {
+        if (n == null) return false;
+        if (old == null) return true;
+        long dt = n.getTime() - old.getTime();
+        if (dt > 30000) return true;
+        if (dt < -30000) return false;
+        return n.getAccuracy() <= old.getAccuracy() || dt > 0 && !old.hasAccuracy();
     }
 
     @Override
@@ -93,12 +140,14 @@ public class PlayerActivity extends Activity {
         hideSystemBars();
         running = true;
         new Thread(this::pollLoop, "poll").start();
+        startLocation();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         running = false;
+        ((LocationManager) getSystemService(LOCATION_SERVICE)).removeUpdates(onFix);
     }
 
     @Override
@@ -126,6 +175,9 @@ public class PlayerActivity extends Activity {
             try {
                 String url = base() + "/state?key=" + FLEET_KEY + "&id=" + enc(deviceId())
                         + "&tablet=" + enc(Build.MANUFACTURER + " " + Build.MODEL) + "&playing=" + enc(current);
+                Location l = fix;
+                if (l != null) url += "&lat=" + l.getLatitude() + "&lng=" + l.getLongitude()
+                        + "&acc=" + Math.round(l.getAccuracy()) + "&fix=" + l.getTime();
                 JSONObject s = new JSONObject(get(url));
                 boolean active = s.getJSONObject("ride").getBoolean("active");
                 JSONArray vids = s.getJSONArray("videos");
