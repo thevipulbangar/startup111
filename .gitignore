@@ -14,3 +14,4 @@ desktop/ride.json
 desktop/videos/
 .firebase/
 desktop/stats.json
+__pycache__/
