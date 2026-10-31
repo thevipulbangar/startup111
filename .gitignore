@@ -12,3 +12,4 @@ functions/.env
 desktop/events.jsonl
 desktop/ride.json
 desktop/videos/
+.firebase/
