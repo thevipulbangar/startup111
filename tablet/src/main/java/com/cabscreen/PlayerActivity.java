@@ -80,6 +80,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        android.util.Log.i("CabScreen", "player started");
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         prefs = getSharedPreferences("cabscreen", MODE_PRIVATE);
         dir = new File(getFilesDir(), "videos");
@@ -179,6 +180,14 @@ public class PlayerActivity extends Activity {
                 if (l != null) url += "&lat=" + l.getLatitude() + "&lng=" + l.getLongitude()
                         + "&acc=" + Math.round(l.getAccuracy()) + "&fix=" + l.getTime();
                 JSONObject s = new JSONObject(get(url));
+                if (s.optBoolean("restart")) { // "Restart app" pressed on the website
+                    android.util.Log.i("CabScreen", "restart requested by website");
+                    running = false;
+                    // ponytail: recreate() rebuilds the player screen in the same task, so screen pinning
+                    // stays on. It does not kill the process; add a full process restart if that's ever needed.
+                    ui.post(this::recreate);
+                    return;
+                }
                 boolean active = s.getJSONObject("ride").getBoolean("active");
                 JSONArray vids = s.getJSONArray("videos");
 

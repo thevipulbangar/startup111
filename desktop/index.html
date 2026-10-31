@@ -112,6 +112,7 @@
 const LABEL = { START: "🟢 RIDE STARTED", END: "🔴 RIDE ENDED", OTHER: "⚪ other" };
 let all = [];
 let videoKey = "";
+const restartSent = {}; // tablet ip -> when Restart was clicked
 
 const $ = id => document.getElementById(id);
 function el(tag, cls, text) {
@@ -237,6 +238,13 @@ function renderState(s) {
              el("div", "muted", "IP " + ip + " · " + (online ? "online" : "offline, last seen " + ago(t.seen))),
              el("div", "muted", t.playing ? "▶ Playing " + t.playing : "Idle"));
     c.append(locationLine(t.loc));
+    // Tablet cards redraw every second, so remember for 5s that a restart was sent.
+    const sent = Date.now() - (restartSent[ip] || 0) < 5000;
+    const rb = el("button", "", sent ? "Restart sent…" : "↻ Restart app");
+    rb.disabled = sent || !online;
+    rb.style.marginTop = "8px";
+    rb.onclick = () => { restartSent[ip] = Date.now(); post("/restart?ip=" + encodeURIComponent(ip)); };
+    c.append(rb);
     tb.append(c);
   }
 }

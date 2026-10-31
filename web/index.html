@@ -122,7 +122,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, collection, doc, query, orderBy, limit, onSnapshot, setDoc, addDoc, deleteDoc, getDocs, writeBatch }
+import { getFirestore, collection, doc, query, orderBy, limit, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDocs, writeBatch }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
@@ -203,7 +203,7 @@ onAuthStateChanged(auth, user => {
     statDocs = Object.fromEntries(s.docs.map(d => [d.id, d.data()]));
     redrawStats();
   }, denied));
-  unsubs.push(onSnapshot(collection(db, "tablets"), s => { tabletDocs = s.docs.map(d => d.data()); renderTablets(); }, denied));
+  unsubs.push(onSnapshot(collection(db, "tablets"), s => { tabletDocs = s.docs.map(d => ({ id: d.id, ...d.data() })); renderTablets(); }, denied));
   unsubs.push(onSnapshot(query(collection(db, "events"), orderBy("received", "desc"), limit(300)),
     s => renderEvents(s.docs.map(d => d.data())), denied));
 });
@@ -250,6 +250,12 @@ function renderTablets() {
              el("div", "muted", "IP " + t.ip + " · " + (online ? "online" : "offline, last seen " + ago(t.seen))),
              el("div", "muted", t.playing ? "▶ Playing " + t.playing.replace(/^\d+_/, "") : "Idle"));
     c.append(locationLine(t.loc));
+    const rb = el("button", "", t.restart ? "Restart sent…" : "↻ Restart app");
+    rb.disabled = !!t.restart || !online;
+    rb.style.marginTop = "8px";
+    // The cloud function delivers it on the tablet's next check-in and clears the flag.
+    rb.onclick = () => updateDoc(doc(db, "tablets", t.id), { restart: true }).catch(fail);
+    c.append(rb);
     box.append(c);
   }
 }

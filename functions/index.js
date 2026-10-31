@@ -36,9 +36,10 @@ const str = (v, max) => String(v ?? "").slice(0, max);
 let cache = { at: 0, body: null };
 async function stateBody() {
   if (Date.now() - cache.at < 2000 && cache.body) return cache.body;
-  const [ride, vids] = await Promise.all([
+  const [ride, vids, restarts] = await Promise.all([
     db.doc("rides/current").get(),
     db.collection("videos").orderBy("created").get(),
+    db.collection("tablets").where("restart", "==", true).get(), // "Restart app" pressed on the website
   ]);
   const body = {
     ride: ride.exists ? ride.data() : { active: false, since: 0, source: "" },
@@ -47,7 +48,7 @@ async function stateBody() {
       return { name: v.path.split("/").pop(), size: v.size, url: v.url };
     }),
   };
-  cache = { at: Date.now(), body };
+  cache = { at: Date.now(), body, restarts: new Set(restarts.docs.map(d => d.id)) };
   return body;
 }
 
@@ -122,7 +123,13 @@ exports.api = onRequest({ region: "asia-south1", maxInstances: 10 }, async (req,
       countPlaytime(id, playing);
       await flushPlaytime();
     }
-    return res.json(await stateBody());
+    const body = await stateBody();
+    if (id && cache.restarts?.has(id)) {
+      cache.restarts.delete(id);
+      await db.doc(`tablets/${id}`).set({ restart: false }, { merge: true });
+      return res.json({ ...body, restart: true });
+    }
+    return res.json(body);
   }
 
   res.status(404).send("Not found");

@@ -22,6 +22,7 @@ PORT = 8000
 VIDEO_EXT = {".mp4", ".webm", ".mkv", ".3gp", ".mov"}
 lock = threading.Lock()  # requests run on separate threads; keep file writes from interleaving
 tablets = {}  # ip -> {"seen": ms, "playing": str} reported by each tablet on every poll
+restart_pending = set()  # tablet ips that should restart on their next poll
 
 VIDEOS.mkdir(exist_ok=True)
 
@@ -137,6 +138,9 @@ class Handler(BaseHTTPRequestHandler):
             print("History cleared")
         elif path == "/ride":
             set_ride(self.query("state") == "start", "website")
+        elif path == "/restart":
+            restart_pending.add(self.query("ip"))  # delivered on that tablet's next poll
+            print("Restart requested for tablet", self.query("ip"))
         elif path == "/stats/reset":
             with lock:
                 stats.clear()
@@ -215,6 +219,9 @@ class Handler(BaseHTTPRequestHandler):
                 count_playtime(tablets.get(ip), t["playing"])
                 tablets[ip] = t
             body = {"ride": get_ride(), "videos": video_list(), "tablets": tablets, "stats": stats}
+            if self.query("tablet") and self.client_address[0] in restart_pending:
+                restart_pending.discard(self.client_address[0])
+                body["restart"] = True
             self.reply(json.dumps(body).encode(), "application/json")
         elif path.startswith("/videos/"):
             name = safe_name(path[len("/videos/"):])
