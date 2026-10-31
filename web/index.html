@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CabScreen Control</title>
+<style>
+  :root { --bg: #f4f5f7; --card: #fff; --text: #1b1d21; --muted: #6b7280; --line: #e3e5e8;
+          --accent: #2563eb; --danger: #dc2626; --ok: #16a34a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111317; --card: #1b1e24; --text: #e8eaed; --muted: #9aa0a6; --line: #2b2f36;
+            --accent: #60a5fa; --danger: #f87171; --ok: #4ade80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 24px 0 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button, .filebtn { font: inherit; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--card); color: var(--text); cursor: pointer; }
+  button:hover, .filebtn:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.danger { color: var(--danger); }
+  button.go { color: var(--ok); }
+  .muted { color: var(--muted); font-size: 13px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+  .dot.live { background: var(--ok); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .grid .card { margin: 0; }
+  .ride { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .ride-state { font-size: 20px; font-weight: 700; }
+  .ride-state.on { color: var(--ok); }
+  .vid { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .vid .name { overflow-wrap: anywhere; }
+  .bold { font-weight: 600; }
+  .meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .tag { font-weight: 600; }
+  .START { color: var(--ok); } .END { color: var(--danger); }
+  .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  progress { width: 220px; }
+  #signin { text-align: center; padding: 80px 16px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="signin" hidden>
+  <h1>CabScreen Control</h1>
+  <p class="muted" id="signinMsg">Sign in with the admin Google account.</p>
+  <button id="login">Sign in with Google</button>
+</div>
+
+<main id="app" hidden>
+  <header>
+    <div>
+      <h1>CabScreen Control</h1>
+      <span class="muted"><span class="dot live"></span><span id="status">Live</span></span>
+    </div>
+    <div class="row">
+      <span class="muted" id="who"></span>
+      <button id="clear" class="danger">Clear notifications</button>
+      <button id="logout">Sign out</button>
+    </div>
+  </header>
+
+  <h2>Ride</h2>
+  <div class="card ride">
+    <div>
+      <div class="ride-state" id="rideState">…</div>
+      <div class="muted" id="rideInfo"></div>
+    </div>
+    <div class="row">
+      <button class="go" id="startRide">▶ Start ride</button>
+      <button class="danger" id="endRide">■ End ride</button>
+    </div>
+  </div>
+
+  <h2>Ad videos <span id="vidCount"></span></h2>
+  <div class="card">
+    <div class="row">
+      <label class="filebtn">⬆ Upload videos<input type="file" id="file" accept="video/*" multiple hidden></label>
+      <progress id="prog" max="1" value="0" hidden></progress>
+      <span class="muted" id="upMsg">Tablets download new videos automatically and play them in this order.</span>
+    </div>
+  </div>
+  <div id="videos"></div>
+
+  <h2>Cab tablets</h2>
+  <div class="grid" id="tablets"><p class="muted">No tablet connected yet.</p></div>
+
+  <h2>Driver phones</h2>
+  <div class="grid" id="devices"><p class="muted">No phone has sent anything yet.</p></div>
+
+  <h2>Notifications <span class="muted">(latest 300)</span></h2>
+  <div id="list"><p class="muted">Nothing yet. Waiting for the phone…</p></div>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getFirestore, collection, doc, query, orderBy, limit, onSnapshot, setDoc, addDoc, deleteDoc, getDocs, writeBatch }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
+
+// Firebase Hosting serves this project's config here, so nothing is hard-coded.
+const app = initializeApp(await (await fetch("/__/firebase/init.json")).json());
+const auth = getAuth(app), db = getFirestore(app), storage = getStorage(app);
+
+const LABEL = { START: "🟢 RIDE STARTED", END: "🔴 RIDE ENDED", OTHER: "⚪ other" };
+const $ = id => document.getElementById(id);
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text; // textContent, never innerHTML: messages come from other people
+  return e;
+}
+const when = t => new Date(t).toLocaleString();
+const ago = t => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? s + "s ago" : s < 3600 ? Math.round(s / 60) + " min ago" : when(t); };
+const mb = n => (n / 1048576).toFixed(1) + " MB";
+const fail = e => { console.error(e); alert(e.code === "permission-denied" ? "This Google account is not an admin." : e.message); };
+
+let unsubs = [];
+let tabletDocs = [];
+
+$("login").onclick = () => signInWithPopup(auth, new GoogleAuthProvider()).catch(fail);
+$("logout").onclick = () => signOut(auth);
+
+onAuthStateChanged(auth, user => {
+  unsubs.forEach(u => u()); unsubs = [];
+  $("signin").hidden = !!user; $("app").hidden = !user;
+  if (!user) return;
+  $("who").textContent = user.email;
+  const denied = e => {
+    if (e.code !== "permission-denied") return console.error(e);
+    signOut(auth);
+    $("signinMsg").textContent = user.email + " is not an admin. Sign in with the admin account.";
+  };
+
+  unsubs.push(onSnapshot(doc(db, "rides/current"), s => renderRide(s.data() || { active: false }), denied));
+  unsubs.push(onSnapshot(query(collection(db, "videos"), orderBy("created")), s => renderVideos(s.docs), denied));
+  unsubs.push(onSnapshot(collection(db, "tablets"), s => { tabletDocs = s.docs.map(d => d.data()); renderTablets(); }, denied));
+  unsubs.push(onSnapshot(query(collection(db, "events"), orderBy("received", "desc"), limit(300)),
+    s => renderEvents(s.docs.map(d => d.data())), denied));
+});
+setInterval(renderTablets, 5000); // keep "online/offline" fresh
+
+function renderRide(r) {
+  const on = !!r.active;
+  $("rideState").textContent = on ? "🟢 Ride in progress — ads playing" : "⚪ No ride — ads stopped";
+  $("rideState").className = "ride-state" + (on ? " on" : "");
+  $("rideInfo").textContent = r.since ? (on ? "Started " : "Ended ") + when(r.since) + " · by " + r.source : "";
+  $("startRide").disabled = on;
+  $("endRide").disabled = !on;
+}
+
+function renderVideos(docs) {
+  $("vidCount").textContent = "(" + docs.length + ")";
+  const box = $("videos");
+  box.replaceChildren();
+  if (!docs.length) box.append(el("p", "muted", "No videos yet. Upload one above."));
+  docs.forEach((d, i) => {
+    const v = d.data();
+    const c = el("div", "card vid");
+    const left = el("div");
+    left.append(el("div", "name bold", (i + 1) + ". " + v.name), el("div", "muted", mb(v.size)));
+    const del = el("button", "danger", "Delete");
+    del.onclick = async () => {
+      if (!confirm("Delete " + v.name + "? Tablets will remove it too.")) return;
+      await deleteObject(ref(storage, v.path)).catch(() => {});
+      await deleteDoc(d.ref).catch(fail);
+    };
+    c.append(left, del);
+    box.append(c);
+  });
+}
+
+function renderTablets() {
+  const box = $("tablets");
+  box.replaceChildren();
+  if (!tabletDocs.length) return box.append(el("p", "muted", "No tablet connected yet."));
+  for (const t of tabletDocs) {
+    const online = Date.now() - t.seen < 60000; // tablets check in at least every 30s
+    const c = el("div", "card");
+    c.append(el("div", "bold", (online ? "🟢 " : "🔴 ") + "📺 " + t.name),
+             el("div", "muted", "IP " + t.ip + " · " + (online ? "online" : "offline, last seen " + ago(t.seen))),
+             el("div", "muted", t.playing ? "▶ Playing " + t.playing.replace(/^\d+_/, "") : "Idle"));
+    box.append(c);
+  }
+}
+
+function renderEvents(events) {
+  const list = $("list");
+  list.replaceChildren();
+  if (!events.length) list.append(el("p", "muted", "Nothing yet. Waiting for the phone…"));
+  const by = new Map();
+  for (const e of events) {
+    const c = el("div", "card");
+    const meta = el("div", "meta");
+    meta.append(el("span", "", when(e.time)), el("span", "tag", e.app),
+                el("span", "tag " + e.type, LABEL[e.type] || e.type));
+    if (e.fare) meta.append(el("span", "tag", "₹" + e.fare));
+    meta.append(el("span", "", "📱 " + (e.device || "Unknown phone")));
+    c.append(meta, el("div", "bold", e.title), el("div", "text", e.text));
+    list.append(c);
+
+    const key = (e.device || "Unknown phone") + "|" + e.ip;
+    const d = by.get(key) || { name: e.device || "Unknown phone", ip: e.ip, android: e.android, count: 0, last: 0, apps: new Set() };
+    d.count++; d.last = Math.max(d.last, e.received || e.time); d.apps.add(e.app);
+    by.set(key, d);
+  }
+  const box = $("devices");
+  box.replaceChildren();
+  if (!by.size) box.append(el("p", "muted", "No phone has sent anything yet."));
+  for (const d of by.values()) {
+    const c = el("div", "card");
+    c.append(el("div", "bold", "📱 " + d.name),
+             el("div", "muted", (d.android ? "Android " + d.android + " · " : "") + "IP " + d.ip),
+             el("div", "muted", d.count + " recent notifications · " + [...d.apps].join(", ")),
+             el("div", "muted", "Last seen " + when(d.last)));
+    box.append(c);
+  }
+}
+
+const setRide = active => setDoc(doc(db, "rides/current"), { active, since: Date.now(), source: "website" }).catch(fail);
+$("startRide").onclick = () => setRide(true);
+$("endRide").onclick = () => setRide(false);
+
+$("clear").onclick = async () => {
+  if (!confirm("Delete all notifications?")) return;
+  for (;;) { // Firestore deletes in batches of up to 500
+    const snap = await getDocs(query(collection(db, "events"), limit(400)));
+    if (snap.empty) break;
+    const b = writeBatch(db);
+    snap.docs.forEach(d => b.delete(d.ref));
+    await b.commit().catch(fail);
+  }
+};
+
+$("file").onchange = async e => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  for (const [i, f] of files.entries()) {
+    $("prog").hidden = false;
+    $("upMsg").textContent = `Uploading ${f.name} (${i + 1}/${files.length})…`;
+    const path = "videos/" + Date.now() + "_" + f.name.replace(/[^\w.\- ]/g, "_");
+    try {
+      const task = uploadBytesResumable(ref(storage, path), f, { contentType: f.type || "video/mp4" });
+      task.on("state_changed", s => { $("prog").value = s.bytesTransferred / s.totalBytes; });
+      await task;
+      const url = await getDownloadURL(ref(storage, path));
+      await addDoc(collection(db, "videos"), { name: f.name, size: f.size, path, url, created: Date.now() });
+    } catch (err) { fail(err); }
+  }
+  $("prog").hidden = true;
+  $("upMsg").textContent = "Done. Tablets download new videos automatically.";
+};
+</script>
+</body>
+</html>

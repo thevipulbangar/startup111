@@ -1,0 +1,14 @@
+# Build output
+.gradle/
+build/
+*.apk
+functions/node_modules/
+
+# Secrets / machine-specific
+local.properties
+functions/.env
+
+# Private data collected at runtime (notifications contain other people's messages)
+desktop/events.jsonl
+desktop/ride.json
+desktop/videos/

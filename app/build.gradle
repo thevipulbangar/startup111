@@ -1,0 +1,20 @@
+plugins { id 'com.android.application' }
+
+// Secret device key lives in local.properties (not in git): fleet.key=...  Must match functions/.env.
+def localProps = new Properties()
+def lp = rootProject.file('local.properties')
+if (lp.exists()) lp.withInputStream { localProps.load(it) }
+
+android {
+    namespace 'com.ridescan'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.ridescan'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+        buildConfigField 'String', 'FLEET_KEY', "\"${localProps.getProperty('fleet.key', '')}\""
+    }
+    buildFeatures { buildConfig true }
+}
