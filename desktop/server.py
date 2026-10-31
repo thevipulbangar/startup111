@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 HERE = Path(__file__).parent
 LOG = HERE / "events.jsonl"
 RIDE = HERE / "ride.json"
+STATS = HERE / "stats.json"  # per video: {"seconds", "plays", "last"}
 VIDEOS = HERE / "videos"
 PORT = 8000
 VIDEO_EXT = {".mp4", ".webm", ".mkv", ".3gp", ".mov"}
@@ -27,6 +28,34 @@ VIDEOS.mkdir(exist_ok=True)
 
 def now_ms():
     return int(time.time() * 1000)
+
+
+def load_stats():
+    try:
+        return json.loads(STATS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+stats = load_stats()
+
+
+def count_playtime(prev, playing):
+    """Called on every tablet poll. Time since the previous poll goes to the video that was playing then.
+    Gaps over 10s (tablet offline) are not counted, so a dropped connection doesn't inflate the numbers."""
+    now = now_ms()
+    changed = False
+    if prev and prev.get("playing"):
+        s = stats.setdefault(prev["playing"], {"seconds": 0, "plays": 0, "last": 0})
+        s["seconds"] += min(now - prev["seen"], 10000) / 1000
+        s["last"] = now
+        changed = True
+    if playing and playing != (prev or {}).get("playing"):
+        stats.setdefault(playing, {"seconds": 0, "plays": 0, "last": 0})["plays"] += 1
+        changed = True
+    if changed:
+        with lock:
+            STATS.write_text(json.dumps(stats), encoding="utf-8")
 
 
 def read_lines():
@@ -108,6 +137,11 @@ class Handler(BaseHTTPRequestHandler):
             print("History cleared")
         elif path == "/ride":
             set_ride(self.query("state") == "start", "website")
+        elif path == "/stats/reset":
+            with lock:
+                stats.clear()
+                STATS.unlink(missing_ok=True)
+            print("Playtime stats reset")
         elif path == "/delete":
             name = safe_name(self.query("name"))
             if not name:
@@ -178,8 +212,9 @@ class Handler(BaseHTTPRequestHandler):
                                 "acc": int(self.query("acc") or 0) or None, "fix": int(self.query("fix") or 0) or None}
                 except ValueError:
                     pass  # no fix in this poll
+                count_playtime(tablets.get(ip), t["playing"])
                 tablets[ip] = t
-            body = {"ride": get_ride(), "videos": video_list(), "tablets": tablets}
+            body = {"ride": get_ride(), "videos": video_list(), "tablets": tablets, "stats": stats}
             self.reply(json.dumps(body).encode(), "application/json")
         elif path.startswith("/videos/"):
             name = safe_name(path[len("/videos/"):])

@@ -13,7 +13,17 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
-  main { max-width: 860px; margin: 0 auto; padding: 24px 16px; }
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 16px; display: grid;
+         grid-template-columns: minmax(0, 1fr) 340px; gap: 28px; align-items: start; }
+  @media (max-width: 960px) { main { grid-template-columns: 1fr; } }
+  aside { position: sticky; top: 16px; }
+  aside h2:first-child { margin-top: 4px; }
+  .totals { display: flex; justify-content: space-between; gap: 12px; }
+  .big { font-size: 24px; font-weight: 700; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 6px 0 4px; }
+  .bar > div { height: 100%; background: var(--accent); border-radius: 3px; }
+  .stat-head { display: flex; justify-content: space-between; gap: 8px; }
+  .stat-head .name { overflow-wrap: anywhere; }
   header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
   h1 { font-size: 22px; margin: 0; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 24px 0 8px; }
@@ -45,6 +55,7 @@
 </head>
 <body>
 <main>
+<div class="content">
   <header>
     <div>
       <h1>CabScreen Control</h1>
@@ -86,6 +97,16 @@
 
   <h2>Notifications</h2>
   <div id="list"><p class="muted">Nothing yet. Waiting for the phone…</p></div>
+</div>
+  <aside>
+    <h2>Playtime dashboard</h2>
+    <div class="card totals">
+      <div><div class="big" id="totTime">0s</div><div class="muted">total ad time</div></div>
+      <div><div class="big" id="totPlays">0</div><div class="muted">plays</div></div>
+    </div>
+    <div id="stats"><p class="muted">No video has played yet.</p></div>
+    <button id="resetStats" class="danger">Reset stats</button>
+  </aside>
 </main>
 <script>
 const LABEL = { START: "🟢 RIDE STARTED", END: "🔴 RIDE ENDED", OTHER: "⚪ other" };
@@ -101,8 +122,37 @@ function el(tag, cls, text) {
 }
 const deviceName = e => e.device || "Unknown phone";
 const when = t => new Date(t).toLocaleString();
-const ago = t => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? s + "s ago" : Math.round(s / 60) + " min ago"; };
+const ago = t => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? s + "s ago" : s < 3600 ? Math.round(s / 60) + " min ago" : when(t); };
 const mb = n => (n / 1048576).toFixed(1) + " MB";
+
+// ---------- Playtime dashboard ----------
+function dur(sec) {
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+}
+// stats: { fileName: {seconds, plays, last} }, live: file names still uploaded, show: file name -> label
+function renderStats(stats, live, show) {
+  const rows = Object.entries(stats || {}).sort((a, b) => b[1].seconds - a[1].seconds);
+  const total = rows.reduce((t, [, s]) => t + s.seconds, 0);
+  $("totTime").textContent = dur(total);
+  $("totPlays").textContent = rows.reduce((t, [, s]) => t + s.plays, 0);
+  const box = $("stats");
+  box.replaceChildren();
+  if (!rows.length) return box.append(el("p", "muted", "No video has played yet."));
+  for (const [name, s] of rows) {
+    const c = el("div", "card");
+    const head = el("div", "stat-head");
+    head.append(el("span", "name bold", show(name) + (live.includes(name) ? "" : " (deleted)")),
+                el("span", "bold", dur(s.seconds)));
+    const bar = el("div", "bar"), fill = el("div");
+    fill.style.width = (total ? 100 * s.seconds / total : 0).toFixed(1) + "%";
+    bar.append(fill);
+    const pct = total ? Math.round(100 * s.seconds / total) : 0;
+    c.append(head, bar, el("div", "muted", `${s.plays} play${s.plays === 1 ? "" : "s"} · ${pct}% of ad time` + (s.last ? " · last " + ago(s.last) : "")));
+    box.append(c);
+  }
+}
 const post = url => fetch(url, { method: "POST" }).then(r => { if (!r.ok) alert("Only works on the laptop running the server (http://localhost:8000)."); });
 
 function card(e) {
@@ -208,6 +258,7 @@ async function load() {
     }
     renderDevices();
     renderState(state);
+    renderStats(state.stats, state.videos.map(v => v.name), n => n);
     $("dot").className = "dot live";
     $("status").textContent = all.length + " notifications · live";
   } catch {
@@ -239,6 +290,7 @@ $("file").onchange = async e => {
   $("upMsg").textContent = "Done. Tablets download new videos automatically.";
 };
 
+$("resetStats").onclick = () => confirm("Reset all playtime numbers to zero?") && post("/stats/reset");
 $("startRide").onclick = () => post("/ride?state=start");
 $("endRide").onclick = () => post("/ride?state=end");
 $("refresh").onclick = () => location.reload();

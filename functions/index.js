@@ -4,7 +4,7 @@
 // The website talks to Firestore/Storage directly (Google sign-in, admin only, see firestore.rules).
 const { onRequest } = require("firebase-functions/v2/https");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 
 initializeApp();
 const db = getFirestore();
@@ -54,6 +54,33 @@ async function stateBody() {
 // Heartbeats: write a tablet doc only when what it plays changes, or every 30s (saves Firestore writes).
 const lastBeat = new Map();
 
+// Playtime: time between two polls goes to the video that was playing at the earlier poll (gaps over
+// 10s = tablet offline, not counted). Summed in memory and flushed to stats/{file} every 30s.
+// ponytail: an instance shutting down can lose up to 30s of counts; a tablet hopping between
+// instances loses the gap. Fine for ad reports; move counting into the tablet if billing depends on it.
+const lastPoll = new Map(); // tablet id -> { playing, at }
+let pending = {};           // file -> { ms, plays }
+let lastFlush = Date.now();
+
+function countPlaytime(id, playing) {
+  const now = Date.now(), prev = lastPoll.get(id);
+  lastPoll.set(id, { playing, at: now });
+  if (prev?.playing) (pending[prev.playing] ??= { ms: 0, plays: 0 }).ms += Math.min(now - prev.at, 10000);
+  if (playing && playing !== prev?.playing) (pending[playing] ??= { ms: 0, plays: 0 }).plays++;
+}
+
+async function flushPlaytime() {
+  if (Date.now() - lastFlush < 30000 || !Object.keys(pending).length) return;
+  const batch = db.batch(), now = Date.now();
+  for (const [file, p] of Object.entries(pending)) {
+    batch.set(db.doc(`stats/${file.replace(/\//g, "_")}`),
+      { seconds: FieldValue.increment(p.ms / 1000), plays: FieldValue.increment(p.plays), last: now }, { merge: true });
+  }
+  pending = {};
+  lastFlush = now;
+  await batch.commit();
+}
+
 exports.api = onRequest({ region: "asia-south1", maxInstances: 10 }, async (req, res) => {
   res.set("Cache-Control", "no-store");
   if (!KEY || req.query.key !== KEY) return res.status(403).send("Bad key");
@@ -92,6 +119,8 @@ exports.api = onRequest({ region: "asia-south1", maxInstances: 10 }, async (req,
         if (loc) t.loc = loc;
         await db.doc(`tablets/${id}`).set(t, { merge: true }); // merge keeps the last known location
       }
+      countPlaytime(id, playing);
+      await flushPlaytime();
     }
     return res.json(await stateBody());
   }
